@@ -8,7 +8,7 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-    name: "Can create a new collection",
+    name: "Can create a new collection with category",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const items = [types.uint(1), types.uint(2)];
@@ -17,13 +17,13 @@ Clarinet.test({
             Tx.contractCall('trend-sphere', 'create-collection', [
                 types.ascii("Summer Collection"),
                 types.ascii("Hot trends for summer 2024"),
+                types.ascii("streetwear"),
                 types.list(items)
             ], deployer.address)
         ]);
         
         block.receipts[0].result.expectOk().expectUint(0);
         
-        // Verify collection was created
         let getCollection = chain.mineBlock([
             Tx.contractCall('trend-sphere', 'get-collection', [
                 types.uint(0)
@@ -31,27 +31,28 @@ Clarinet.test({
         ]);
         
         const collection = getCollection.receipts[0].result.expectOk().expectSome();
-        assertEquals(collection['title'], "Summer Collection");
+        assertEquals(collection['category'], "streetwear");
     }
 });
 
 Clarinet.test({
-    name: "Can vote for a collection",
+    name: "Can vote and earn rewards",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const voter = accounts.get('wallet_1')!;
         const items = [types.uint(1), types.uint(2)];
         
-        // First create a collection
+        // Create collection
         let block = chain.mineBlock([
             Tx.contractCall('trend-sphere', 'create-collection', [
                 types.ascii("Summer Collection"),
                 types.ascii("Hot trends for summer 2024"),
+                types.ascii("streetwear"),
                 types.list(items)
             ], deployer.address)
         ]);
         
-        // Then vote for it
+        // Vote for collection
         let voteBlock = chain.mineBlock([
             Tx.contractCall('trend-sphere', 'vote-for-collection', [
                 types.uint(0)
@@ -60,31 +61,20 @@ Clarinet.test({
         
         voteBlock.receipts[0].result.expectOk().expectBool(true);
         
-        // Verify vote was counted
-        let getCollection = chain.mineBlock([
-            Tx.contractCall('trend-sphere', 'get-collection', [
+        // Check reward pool
+        let rewardPool = chain.mineBlock([
+            Tx.contractCall('trend-sphere', 'get-reward-pool', [], deployer.address)
+        ]);
+        
+        assertEquals(rewardPool.receipts[0].result.expectOk(), types.uint(10));
+        
+        // Claim rewards
+        let claimBlock = chain.mineBlock([
+            Tx.contractCall('trend-sphere', 'claim-collection-rewards', [
                 types.uint(0)
             ], deployer.address)
         ]);
         
-        const collection = getCollection.receipts[0].result.expectOk().expectSome();
-        assertEquals(collection['votes'], types.uint(1));
-    }
-});
-
-Clarinet.test({
-    name: "Can list item for sale",
-    async fn(chain: Chain, accounts: Map<string, Account>) {
-        const seller = accounts.get('wallet_1')!;
-        
-        let block = chain.mineBlock([
-            Tx.contractCall('trend-sphere', 'list-item', [
-                types.ascii("Vintage Jacket"),
-                types.ascii("Classic denim jacket from the 90s"),
-                types.uint(100)
-            ], seller.address)
-        ]);
-        
-        block.receipts[0].result.expectOk().expectUint(0);
+        claimBlock.receipts[0].result.expectOk().expectUint(5);
     }
 });

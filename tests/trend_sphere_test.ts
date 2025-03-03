@@ -1,80 +1,62 @@
-import {
-  Clarinet,
-  Tx,
-  Chain,
-  Account,
-  types
-} from 'https://deno.land/x/clarinet@v1.0.0/index.ts';
-import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
-
 Clarinet.test({
-    name: "Can create a new collection with category",
-    async fn(chain: Chain, accounts: Map<string, Account>) {
-        const deployer = accounts.get('deployer')!;
-        const items = [types.uint(1), types.uint(2)];
-        
-        let block = chain.mineBlock([
-            Tx.contractCall('trend-sphere', 'create-collection', [
-                types.ascii("Summer Collection"),
-                types.ascii("Hot trends for summer 2024"),
-                types.ascii("streetwear"),
-                types.list(items)
-            ], deployer.address)
-        ]);
-        
-        block.receipts[0].result.expectOk().expectUint(0);
-        
-        let getCollection = chain.mineBlock([
-            Tx.contractCall('trend-sphere', 'get-collection', [
-                types.uint(0)
-            ], deployer.address)
-        ]);
-        
-        const collection = getCollection.receipts[0].result.expectOk().expectSome();
-        assertEquals(collection['category'], "streetwear");
-    }
-});
-
-Clarinet.test({
-    name: "Can vote and earn rewards",
+    name: "Validates items properly and enforces reward caps",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const voter = accounts.get('wallet_1')!;
-        const items = [types.uint(1), types.uint(2)];
         
-        // Create collection
-        let block = chain.mineBlock([
-            Tx.contractCall('trend-sphere', 'create-collection', [
-                types.ascii("Summer Collection"),
-                types.ascii("Hot trends for summer 2024"),
-                types.ascii("streetwear"),
-                types.list(items)
+        // Create test item
+        let itemBlock = chain.mineBlock([
+            Tx.contractCall('trend-sphere', 'list-item', [
+                types.ascii("Item 1"),
+                types.ascii("Description"),
+                types.uint(100),
+                types.ascii("streetwear")
             ], deployer.address)
         ]);
         
-        // Vote for collection
-        let voteBlock = chain.mineBlock([
-            Tx.contractCall('trend-sphere', 'vote-for-collection', [
-                types.uint(0)
-            ], voter.address)
+        itemBlock.receipts[0].result.expectOk().expectUint(0);
+        
+        // Test invalid item collection
+        let invalidBlock = chain.mineBlock([
+            Tx.contractCall('trend-sphere', 'create-collection', [
+                types.ascii("Invalid Collection"),
+                types.ascii("Description"),
+                types.ascii("streetwear"),
+                types.list([types.uint(999)])
+            ], deployer.address)
         ]);
         
-        voteBlock.receipts[0].result.expectOk().expectBool(true);
+        invalidBlock.receipts[0].result.expectErr(105);
         
-        // Check reward pool
-        let rewardPool = chain.mineBlock([
-            Tx.contractCall('trend-sphere', 'get-reward-pool', [], deployer.address)
+        // Test reward calculation
+        let validBlock = chain.mineBlock([
+            Tx.contractCall('trend-sphere', 'create-collection', [
+                types.ascii("Valid Collection"),
+                types.ascii("Description"),
+                types.ascii("streetwear"),
+                types.list([types.uint(0)])
+            ], deployer.address)
         ]);
         
-        assertEquals(rewardPool.receipts[0].result.expectOk(), types.uint(10));
+        validBlock.receipts[0].result.expectOk().expectUint(0);
         
-        // Claim rewards
+        // Test progressive rewards
+        let expectedReward = 100; // base-reward
+        for(let i = 0; i < 10; i++) {
+            chain.mineBlock([
+                Tx.contractCall('trend-sphere', 'vote-for-collection', [
+                    types.uint(0)
+                ], voter.address)
+            ]);
+            expectedReward = Math.min(1000, expectedReward + 5); // vote-multiplier
+        }
+        
         let claimBlock = chain.mineBlock([
             Tx.contractCall('trend-sphere', 'claim-collection-rewards', [
                 types.uint(0)
             ], deployer.address)
         ]);
         
-        claimBlock.receipts[0].result.expectOk().expectUint(5);
+        claimBlock.receipts[0].result.expectOk().expectUint(expectedReward);
     }
 });

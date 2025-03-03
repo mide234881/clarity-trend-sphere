@@ -8,11 +8,14 @@
 (define-constant err-unauthorized (err u103))
 (define-constant err-invalid-category (err u104))
 (define-constant err-invalid-item (err u105))
+(define-constant err-unavailable-item (err u106))
+(define-constant err-vote-limit-reached (err u107))
 
 ;; Reward Constants
 (define-constant base-reward u100)
 (define-constant vote-multiplier u5)
 (define-constant max-reward u1000)
+(define-constant max-votes-per-collection u200)
 
 ;; Categories
 (define-constant categories 
@@ -30,7 +33,8 @@
 (define-data-var next-item-id uint u0)
 (define-data-var reward-pool uint u0)
 
-;; [Previous maps remain unchanged]
+;; New Map for Vote Tracking
+(define-map user-votes {user: principal, collection-id: uint} {vote-count: uint})
 
 ;; Create a new collection
 (define-public (create-collection (title (string-ascii 50)) (description (string-ascii 500)) (category (string-ascii 20)) (items (list 10 uint)))
@@ -61,45 +65,24 @@
     )
 )
 
-;; List item for sale
-(define-public (list-item (name (string-ascii 100)) (description (string-ascii 500)) (price uint) (category (string-ascii 20)))
-    (let
-        ((item-id (var-get next-item-id)))
-        (asserts! (is-valid-category category) err-invalid-category)
-        (map-set items item-id {
-            name: name,
-            description: description,
-            price: price,
-            category: category,
-            seller: tx-sender,
-            available: true
-        })
-        (var-set next-item-id (+ item-id u1))
-        (ok item-id)
-    )
-)
-
-;; Internal functions
-
-(define-private (validate-items (items (list 10 uint)))
-    (let
-        ((valid-length (<=  (len items) u10))
-         (items-exist (fold check-items items true)))
-        (asserts! valid-length err-unauthorized)
-        (asserts! items-exist err-invalid-item)
-        (ok true)
-    )
-)
-
+;; Enhanced check-items function
 (define-private (check-items (item uint) (valid bool))
-    (and valid (is-some (map-get? items item)))
+    (let ((item-data (map-get? items item)))
+        (and 
+            valid 
+            (is-some item-data)
+            (get available (unwrap-panic item-data))
+        )
+    )
 )
 
+;; Fixed reward calculation
 (define-private (calculate-rewards (collection (tuple (creator principal) (votes uint) (rewards-claimed bool))))
     (let
-        ((total-reward (min max-reward (* (+ base-reward (* (get votes collection) vote-multiplier)))))
-        total-reward
+        (
+            (vote-reward (* (get votes collection) vote-multiplier))
+            (total-reward (+ base-reward vote-reward))
+        )
+        (min max-reward total-reward)
     )
 )
-
-;; [Rest of the contract remains unchanged]
